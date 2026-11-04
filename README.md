@@ -1,1 +1,1 @@
-# Despliegue_cafe_ml2
+Para el ejercicio de despliegue, se usa una base que tiene las ventas de café de dos tiendas, la base se obtiene de Kaggle, este es el link: https://www.kaggle.com/datasets/maurosteban99/datos-caf-limpios Se realizará un modelo no supervisado
