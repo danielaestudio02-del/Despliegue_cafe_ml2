@@ -111,7 +111,15 @@ Diccionario con las llaves que usa la app de Streamlit:
 - Preprocesamiento dentro del Pipeline.
 - `train.py` reconstruye el modelo con un solo comando.
 - **Versiones de librerías:** la última celda del notebook imprime las versiones exactas usadas en Colab. Deben copiarse en `requirements.txt`, porque un `model.joblib` guardado con una versión de scikit-learn puede fallar al cargarse con otra dentro de Docker.
-  - El `model.joblib` actual fue entrenado con **`scikit-learn==1.6.1`**. Esa versión debe fijarse en `requirements.txt`.
+  - El `model.joblib` actual fue entrenado en Colab con estas versiones, que deben usarse en `requirements.txt`:
+
+    ```
+    streamlit==1.66.1
+    pandas==2.2.3
+    numpy==2.4.6
+    scikit-learn==1.6.1
+    joblib==1.6.0
+    ```
 
 ## Despliegue (Parte 2)
 
