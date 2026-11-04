@@ -69,20 +69,16 @@ La aplicación recibe `Quantity`, `Price Per Unit` y `Total Spent` de una transa
 ```
 .
 ├── README.md
-├── clean_cafe_saless.csv
+├── train.py                    # Script reproducible de entrenamiento
+├── model.joblib                # Modelo entrenado (generado en Colab)
+├── clean_cafe_saless.csv       # Dataset (lo lee el notebook desde GitHub)
+├── data/
+│   └── clean_cafe_saless.csv   # Dataset que usa train.py
 └── notebooks/
     └── cafe_ml2_modelo.ipynb   # Parte 1: construcción del modelo
 ```
 
-Al ejecutar el notebook en Colab se generan en `/content/ml_streamlit_project/`:
-
-```
-ml_streamlit_project/
-├── train.py
-├── model.joblib
-└── data/
-    └── clean_cafe_saless.csv
-```
+`train.py` y `model.joblib` se generaron ejecutando el notebook en Google Colab (carpeta `/content/ml_streamlit_project/`) y se subieron a la raíz del repositorio.
 
 ## Cómo ejecutar el notebook
 
@@ -115,6 +111,7 @@ Diccionario con las llaves que usa la app de Streamlit:
 - Preprocesamiento dentro del Pipeline.
 - `train.py` reconstruye el modelo con un solo comando.
 - **Versiones de librerías:** la última celda del notebook imprime las versiones exactas usadas en Colab. Deben copiarse en `requirements.txt`, porque un `model.joblib` guardado con una versión de scikit-learn puede fallar al cargarse con otra dentro de Docker.
+  - El `model.joblib` actual fue entrenado con **`scikit-learn==1.6.1`**. Esa versión debe fijarse en `requirements.txt`.
 
 ## Despliegue (Parte 2)
 
