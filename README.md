@@ -7,7 +7,7 @@ Agrupar las transacciones de ventas de café en **tipos de compra** usando apren
 ## Dataset
 
 - **Fuente:** ventas de café de dos tiendas, obtenidas de Kaggle: https://www.kaggle.com/datasets/maurosteban99/datos-caf-limpios
-- **Archivo:** `clean_cafe_saless.csv` (3.477 filas, 8 columnas, sin valores faltantes).
+- **Archivo:** `data/clean_cafe_saless.csv` (3.477 filas, 8 columnas, sin valores faltantes).
 - **Unidad de observación:** cada fila es **una transacción** (no un cliente). Por eso los clusters se interpretan como *tipos de compra*.
 
 | Columna | Tipo | ¿Se usa en el modelo? |
@@ -71,9 +71,8 @@ La aplicación recibe `Quantity`, `Price Per Unit` y `Total Spent` de una transa
 ├── README.md
 ├── train.py                    # Script reproducible de entrenamiento
 ├── model.joblib                # Modelo entrenado (generado en Colab)
-├── clean_cafe_saless.csv       # Dataset (lo lee el notebook desde GitHub)
 ├── data/
-│   └── clean_cafe_saless.csv   # Dataset que usa train.py
+│   └── clean_cafe_saless.csv   # Dataset (lo usan el notebook y train.py)
 └── notebooks/
     └── cafe_ml2_modelo.ipynb   # Parte 1: construcción del modelo
 ```
