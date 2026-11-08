@@ -2,128 +2,168 @@
 
 ## Objetivo
 
-Agrupar las transacciones de ventas de café en **tipos de compra** usando aprendizaje **no supervisado** (Ruta B: K-Means), y desplegar el modelo en una aplicación Streamlit empaquetada con Docker en una VM de Google Cloud.
+Agrupar las transacciones de ventas de café en **tipos de compra** usando aprendizaje **no supervisado** (Ruta B: K-Means), y desplegar el modelo en una aplicación Streamlit empaquetada con Docker en una VM de Google Cloud Compute Engine.
 
 ## Dataset
 
-- **Fuente:** ventas de café de dos tiendas, obtenidas de Kaggle: https://www.kaggle.com/datasets/maurosteban99/datos-caf-limpios
+- **Fuente:** Ventas de café de dos tiendas, obtenidas de Kaggle: https://www.kaggle.com/datasets/maurosteban99/datos-caf-limpios
 - **Archivo:** `data/clean_cafe_saless.csv` (3.477 filas, 8 columnas, sin valores faltantes).
-- **Unidad de observación:** cada fila es **una transacción** (no un cliente). Por eso los clusters se interpretan como *tipos de compra*.
+- **Unidad de observación:** Cada fila es **una transacción** individual (no un cliente). Por eso los clusters se interpretan como *tipos de compra*.
 
 | Columna | Tipo | ¿Se usa en el modelo? |
 |---|---|---|
-| `Transaction ID` | Identificador | No (es un identificador) |
-| `Item` | Categórica (8 productos) | No (versión base solo con numéricas) |
+| `Transaction ID` | Identificador | No (es un identificador sin valor predictivo) |
+| `Item` | Categórica (8 productos) | No (versión base enfocada en magnitudes numéricas) |
 | `Quantity` | Numérica (1 a 5) | **Sí** |
 | `Price Per Unit` | Numérica (1 a 5) | **Sí** |
 | `Total Spent` | Numérica (1 a 20) | **Sí** |
 | `Payment Method` | Categórica (3) | No |
 | `Location` | Categórica (In-store / Takeaway) | No |
-| `Transaction Date` | Fecha | No (no tiene sentido como entrada de un caso nuevo) |
+| `Transaction Date` | Fecha | No (no tiene sentido como entrada en un caso nuevo) |
 
 ### Limitaciones de los datos
 
-1. **`Total Spent` es casi redundante:** en teoría es `Quantity × Price Per Unit`, y así se cumple en el 89% de las filas. Se mantiene para seguir la guía, pero hace que el gasto total pese más al formar los grupos.
-2. **Posible imputación previa:** cada producto tiene un precio fijo (Salad 5, Sandwich 4, Coffee 2…), pero unas 137 filas tienen precio 3.0 en productos que no cuestan eso. Además, en 388 filas (11%) `Total Spent` no coincide con cantidad × precio. Los valores que se repiten (cantidad 3, precio 3, total 8) son justo las medianas, así que probablemente quien limpió la base rellenó faltantes con la mediana. En esta versión base no se corrigen; se dejan documentadas.
-3. **Datos muy discretos:** cantidad y precio toman pocos valores, por lo que los clusters dividen una "cuadrícula" más que descubrir grupos naturales.
+1. **`Total Spent` es casi redundante:** En teoría es `Quantity × Price Per Unit`, y así se cumple en el 89% de las filas. Se mantiene según la guía, pero hace que el gasto total pese más al formar los grupos.
+2. **Posible imputación previa:** Cada producto tiene un precio estándar aproximado, pero unas 137 filas tienen precio 3.0 en productos que no corresponden. Además, en 388 filas (11%) `Total Spent` difiere de cantidad × precio debido a medianas imputadas previamente.
+3. **Datos discretos:** Cantidad y precio toman rangos acotados (1 a 5), por lo que los clusters reflejan segmentos operativos bien definidos en el consumo.
 
 ## Ruta elegida
 
-**Ruta B — Aprendizaje no supervisado** (no hay una variable objetivo; se buscan grupos).
+**Ruta B — Aprendizaje no supervisado** (segmentación de transacciones con K-Means).
 
 ## Preparación de datos y modelo
 
-Todo está dentro de un `Pipeline` de scikit-learn, para que la app aplique exactamente las mismas transformaciones que el entrenamiento:
+Todo el flujo está encapsulado en un `Pipeline` de scikit-learn para garantizar total reproducibilidad tanto en entrenamiento como en inferencia dentro de Streamlit:
 
-1. `SimpleImputer(strategy="median")`
-2. `StandardScaler()`
-3. `KMeans(n_clusters=3, random_state=42, n_init="auto")`
+1. `SimpleImputer(strategy="median")`: Maneja posibles faltantes numéricos.
+2. `StandardScaler()`: Estandariza las escalas para que magnitudes de gasto no distorsionen el cálculo de distancias euclidianas.
+3. `KMeans(n_clusters=3, random_state=42, n_init="auto")`: Segmenta las transacciones en 3 grupos principales.
 
-**Justificación:** K-Means es el modelo recomendado por la guía para despliegue porque permite asignar casos nuevos con `predict()`. `random_state=42` hace que el resultado sea reproducible.
+**Justificación:** K-Means es ideal para despliegue productivo ligero porque asigna observaciones nuevas mediante el método `.predict()`. Fijar `random_state=42` garantiza resultados 100% reproducibles.
 
 ## Evaluación
 
-- **Silhouette:** 0.39 (estructura aceptable; va de -1 a 1).
+- **Silhouette Score:** ~0.39 (indica una separación y cohesión estructural adecuada).
 - **Perfiles promedio por cluster:**
 
-| Cluster | Cantidad | Precio unitario | Gasto total | Transacciones | Interpretación |
+| Cluster | Cantidad media | Precio unitario medio | Gasto total medio | Transacciones | Interpretación comercial |
 |---|---|---|---|---|---|
-| 0 | 3.9 | $3.89 | $14.72 | 1.168 | Compra grande de productos caros (ensaladas, sándwiches, smoothies) |
-| 1 | 3.8 | $1.84 | $6.58 | 1.015 | Muchas unidades de productos baratos (té, galletas, café) |
-| 2 | 1.5 | $2.83 | $4.22 | 1.294 | Compra pequeña / individual |
+| **0** | 3.9 uds | $3.89 | $14.72 | 1.168 | **Compra grande / tickets altos** (ensaladas, smoothies, sándwiches) |
+| **1** | 3.8 uds | $1.84 | $6.58 | 1.015 | **Volumen de productos económicos** (galletas, té, café en cantidad) |
+| **2** | 1.5 uds | $2.83 | $4.22 | 1.294 | **Compra individual / de paso** (1 café o snack rápido) |
 
 ## Interpretación de la salida
 
-La aplicación recibe `Quantity`, `Price Per Unit` y `Total Spent` de una transacción nueva y devuelve el **cluster asignado** con una descripción del tipo de compra.
+La aplicación Streamlit recibe `Quantity`, `Price Per Unit` y `Total Spent` de una nueva transacción y calcula en tiempo real el cluster asignado, mostrando la descripción de la compra y su perfil sugerido.
 
 ### Ejemplo de entrada y salida
 
-| Quantity | Price Per Unit | Total Spent | Cluster | Tipo de compra |
-|---|---|---|---|---|
-| 1 | 2.0 | 2.0 | 2 | Compra pequeña / individual (1 café) |
-| 5 | 1.0 | 5.0 | 1 | Muchas unidades baratas (5 galletas) |
-| 4 | 5.0 | 20.0 | 0 | Compra grande de productos caros (4 ensaladas) |
+| Caso de prueba | Quantity | Price Per Unit | Total Spent | Cluster Esperado | Tipo de compra |
+|---|---|---|---|---|---|
+| **Caso 1** | 1.0 | 2.0 | 2.0 | **Cluster 2** | Compra individual / ticket bajo (1 café) |
+| **Caso 2** | 5.0 | 1.0 | 5.0 | **Cluster 1** | Muchas unidades de bajo costo (5 galletas) |
+| **Caso 3** | 4.0 | 5.0 | 20.0 | **Cluster 0** | Compra grande de productos caros (4 ensaladas) |
+
+---
 
 ## Estructura del proyecto
 
-```
-.
-├── README.md
+```text
+ml_streamlit_project/
+├── app.py                      # Aplicación interactiva Streamlit
 ├── train.py                    # Script reproducible de entrenamiento
-├── model.joblib                # Modelo entrenado (generado en Colab)
+├── model.joblib                # Modelo empaquetado y serializado
+├── requirements.txt            # Dependencias del proyecto
+├── Dockerfile                  # Instrucciones para la imagen Docker
+├── .dockerignore               # Archivos omitidos en la construcción Docker
+├── README.md                   # Documentación completa y guía de despliegue
 ├── data/
-│   └── clean_cafe_saless.csv   # Dataset (lo usan el notebook y train.py)
+│   └── clean_cafe_saless.csv   # Dataset de ventas
 └── notebooks/
-    └── cafe_ml2_modelo.ipynb   # Parte 1: construcción del modelo
+    └── cafe_ml2_modelo.ipynb   # Cuaderno de análisis exploratorio previo
 ```
 
-`train.py` y `model.joblib` se generaron ejecutando el notebook en Google Colab (carpeta `/content/ml_streamlit_project/`) y se subieron a la raíz del repositorio.
+---
 
-## Cómo ejecutar el notebook
+## Instrucciones de Reproducción y Despliegue
 
-1. Abrir `notebooks/cafe_ml2_modelo.ipynb` en Google Colab.
-2. Ejecutar todas las celdas (*Entorno de ejecución → Ejecutar todas*). Los datos se leen directamente desde este repositorio.
-
-## Cómo ejecutar `train.py`
-
-Desde la carpeta del proyecto (donde está `data/clean_cafe_saless.csv`):
-
+### 1. Reconstruir el modelo localmente (`train.py`)
+Para reentrenar el modelo y generar nuevamente el artefacto `model.joblib`:
 ```bash
 python train.py
 ```
 
-Esto reconstruye `model.joblib` desde cero. El notebook verifica que el modelo generado por `train.py` asigna los mismos clusters que el entrenado en las celdas.
+### 2. Ejecutar la aplicación Streamlit localmente
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+Acceder en el navegador a `http://localhost:8501`.
 
-### Contenido de `model.joblib`
+### 3. Construir la imagen Docker
+Desde la raíz del repositorio:
+```bash
+docker build -t ml-streamlit-app .
+```
 
-Diccionario con las llaves que usa la app de Streamlit:
+### 4. Ejecutar el contenedor Docker
+- **Prueba interactiva:**
+  ```bash
+  docker run --rm -p 8501:8501 ml-streamlit-app
+  ```
+- **Ejecución en segundo plano (daemon):**
+  ```bash
+  docker run -d --name ml-streamlit --restart unless-stopped -p 8501:8501 ml-streamlit-app
+  ```
+- **Monitoreo y logs:**
+  ```bash
+  docker ps
+  docker logs ml-streamlit
+  ```
 
-- `model`: Pipeline entrenado
-- `features`: `["Quantity", "Price Per Unit", "Total Spent"]`
-- `numeric_features`: igual que `features`
-- `task`: `"clustering"`
-- `cluster_descriptions`: descripción de cada cluster
+---
 
-## Reproducibilidad
+## Despliegue en Google Cloud Compute Engine (GCP)
 
-- `random_state=42` en K-Means.
-- Preprocesamiento dentro del Pipeline.
-- `train.py` reconstruye el modelo con un solo comando.
-- **Versiones de librerías:** la última celda del notebook imprime las versiones exactas usadas en Colab. Deben copiarse en `requirements.txt`, porque un `model.joblib` guardado con una versión de scikit-learn puede fallar al cargarse con otra dentro de Docker.
-  - El `model.joblib` actual fue entrenado en Colab con estas versiones, que deben usarse en `requirements.txt`:
+1. **Crear Instancia VM en GCP:**
+   - Sistema Operativo: Ubuntu 24.04 LTS (o Ubuntu 22.04 LTS).
+   - Tipo de máquina: `e2-micro` o `e2-small` (económicas y suficientes).
+   - Asegurar que tenga asignada una **IP externa efímera o estática**.
+   - Asignar una etiqueta de red (Network Tag): `streamlit-server`.
 
-    ```
-    streamlit==1.66.1
-    pandas==2.2.3
-    numpy==2.4.6
-    scikit-learn==1.6.1
-    joblib==1.6.0
-    ```
+2. **Configurar regla de firewall en GCP:**
+   - Crear una regla de ingreso para permitir el puerto 8501:
+   ```bash
+   gcloud compute firewall-rules create allow-streamlit-8501 \
+       --allow=tcp:8501 \
+       --direction=INGRESS \
+       --target-tags=streamlit-server
+   ```
+   *(También puede crearse desde la consola web en Red de VPC > Cortafuegos).*
 
-## Despliegue (Parte 2)
+3. **Conectarse vía SSH a la VM e instalar dependencias:**
+   ```bash
+   sudo apt update
+   sudo apt install -y docker.io git
+   sudo systemctl enable --now docker
+   sudo usermod -aG docker $USER
+   ```
+   *(Cerrar sesión SSH y volver a ingresar para aplicar el grupo docker).*
 
-_Pendiente: cómo ejecutar Streamlit, construir la imagen Docker, ejecutar el contenedor y desplegar en GCP._
+4. **Clonar el proyecto y desplegar:**
+   ```bash
+   git clone <URL_DE_TU_REPOSITORIO_GITHUB>
+   cd Despliegue_cafe_ml2
+   docker build -t ml-streamlit-app .
+   docker run -d --name ml-streamlit --restart unless-stopped -p 8501:8501 ml-streamlit-app
+   ```
+
+5. **Acceso público:**
+   Ingresar desde cualquier navegador a:
+   `http://<IP_EXTERNA_DE_TU_VM>:8501`
+
+---
 
 ## Autores
-
-_Pendiente: nombres de la pareja._
+- Integrante 1: *(Nombre completo y código)*
+- Integrante 2: *(Nombre completo y código)*
