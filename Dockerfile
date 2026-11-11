@@ -2,6 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Carpeta con permisos de escritura para la configuración de Streamlit,
+# aunque el contenedor no se ejecute como administrador (p. ej. Hugging Face).
+ENV HOME=/tmp
+
 COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
