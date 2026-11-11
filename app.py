@@ -49,6 +49,39 @@ EJEMPLOS = {
     "🥗 Ensaladas": (4, 5.0),
 }
 
+VARIEDADES = [
+    ("Espresso", "Café concentrado, intenso y corto.", [(1.0, "#3B2214")]),
+    ("Americano", "Espresso alargado con agua caliente.", [(0.4, "#3B2214"), (0.6, "#7A4A2A")]),
+    ("Capuchino", "Espresso, leche y mucha espuma.",
+     [(0.33, "#3B2214"), (0.33, "#C69C72"), (0.34, "#FBF3E6")]),
+    ("Latte", "Espresso con mucha leche y poca espuma.",
+     [(0.25, "#3B2214"), (0.6, "#D9B48A"), (0.15, "#FBF3E6")]),
+    ("Mocha", "Espresso, chocolate y leche.",
+     [(0.25, "#2B160C"), (0.25, "#5C3A21"), (0.35, "#C69C72"), (0.15, "#FBF3E6")]),
+    ("Macchiato", "Espresso con una mancha de espuma.", [(0.7, "#3B2214"), (0.3, "#FBF3E6")]),
+]
+
+
+def taza_svg(capas, idx: int) -> str:
+    """Dibuja un vaso con las capas de la bebida (de abajo hacia arriba)."""
+    top, bottom, h = 10, 66, 56
+    rects, y = [], bottom
+    for frac, color in capas:
+        alto = h * frac
+        y -= alto
+        rects.append(f'<rect x="0" y="{y:.1f}" width="64" height="{alto + 0.5:.1f}" fill="{color}"/>')
+    vaso = "M10 10 L54 10 L49 66 Q48 70 44 70 L20 70 Q16 70 15 66 Z"
+    return (
+        f'<svg width="58" height="66" viewBox="0 0 70 76">'
+        f'<defs><clipPath id="vaso{idx}"><path d="{vaso}"/></clipPath></defs>'
+        f'<path d="M54 26 q12 0 12 12 q0 12 -14 12" stroke="#E8DCC8" stroke-width="4" fill="none"/>'
+        f'<g clip-path="url(#vaso{idx})">{"".join(rects)}</g>'
+        f'<path d="{vaso}" fill="none" stroke="#E8DCC8" stroke-width="2.5"/>'
+        f'<path d="M26 5 q-4 -4 0 -8 M38 5 q-4 -4 0 -8" stroke="#E8DCC8" stroke-width="2" fill="none" opacity=".6"/>'
+        f"</svg>"
+    )
+
+
 st.set_page_config(
     page_title="Café ML2 · Segmentación de compras",
     page_icon="☕",
@@ -70,6 +103,17 @@ st.markdown(
       .result h2 {color: #fff; margin: 0; font-size: 1.6rem;}
       .result p {margin: .3rem 0 0 0; opacity: .95;}
       .footer {text-align: center; opacity: .65; font-size: .85rem; padding: 1.5rem 0 .5rem 0;}
+      [data-testid="stSidebar"] {background: linear-gradient(180deg, #3B2618 0%, #2A1A10 100%);}
+      [data-testid="stSidebar"] * {color: #F4EBDD;}
+      [data-testid="stSidebar"] hr {border-color: rgba(244,235,221,.25);}
+      [data-testid="stSidebar"] [data-testid="stExpander"] details {
+        background: rgba(255,255,255,.06); border-color: rgba(244,235,221,.2);}
+      .carta {display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin: .4rem 0 .6rem 0;}
+      .bebida {background: rgba(255,255,255,.07); border: 1px solid rgba(244,235,221,.15);
+               border-radius: 12px; padding: .6rem .5rem .55rem .5rem; text-align: center;}
+      .bebida svg {display: block; margin: 0 auto .3rem auto;}
+      .bebida b {display: block; font-size: .92rem;}
+      .bebida span {display: block; font-size: .72rem; opacity: .78; line-height: 1.25;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -90,11 +134,20 @@ if _fondo:
         f"""
         <style>
           .stApp {{
-            background: linear-gradient(rgba(255,250,244,.90), rgba(255,250,244,.94)),
+            background: linear-gradient(rgba(43,27,17,.05), rgba(43,27,17,.15)),
                         {_url} center / cover fixed;
           }}
           [data-testid="stHeader"] {{background: transparent;}}
-          [data-testid="stSidebar"] {{background: rgba(246,241,235,.96);}}
+          [data-testid="stMain"] .block-container {{
+            background: rgba(255,250,244,.80);
+            backdrop-filter: blur(3px);
+            border-radius: 18px;
+            padding: 1.6rem 2.2rem 1rem 2.2rem;
+            margin-top: 3rem;
+            max-width: 1080px;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 40px rgba(30,18,10,.35);
+          }}
           .hero {{
             background: linear-gradient(90deg, rgba(43,27,17,.90) 0%, rgba(43,27,17,.62) 55%, rgba(43,27,17,.25) 100%),
                         {_url} center / cover;
@@ -156,24 +209,26 @@ def nombre_cluster(c: int) -> str:
 # ---------------------------------------------------------------- Barra lateral
 with st.sidebar:
     st.markdown("## ☕ Café ML2")
-    st.caption("Segmentación de transacciones con Machine Learning no supervisado.")
+    st.caption("Segmentación de compras en una cafetería.")
     st.divider()
-    st.markdown("**Modelo**")
-    st.markdown(
-        "- Algoritmo: **K-Means** (3 clusters)\n"
-        "- Preprocesamiento: imputación (mediana) + estandarización\n"
-        "- Variables: cantidad, precio unitario y gasto total"
+    st.markdown("### Variedades de café")
+    tarjetas = "".join(
+        f'<div class="bebida">{taza_svg(capas, i)}<b>{nombre}</b><span>{desc}</span></div>'
+        for i, (nombre, desc, capas) in enumerate(VARIEDADES)
     )
-    st.markdown("**Datos**")
-    st.markdown(
-        "- Ventas de café de dos tiendas (Kaggle)\n"
-        "- Cada fila es **una transacción**"
-    )
+    st.markdown(f'<div class="carta">{tarjetas}</div>', unsafe_allow_html=True)
     st.divider()
-    st.markdown("**Tipos de compra**")
+    st.markdown("### Tipos de compra")
     for c, info in CLUSTER_INFO.items():
         st.markdown(f"{info['icono']} **{info['nombre']}**")
     st.divider()
+    with st.expander("Sobre el modelo"):
+        st.markdown(
+            "- **K-Means** con 3 grupos\n"
+            "- Imputación (mediana) + estandarización\n"
+            "- Variables: cantidad, precio unitario y gasto total\n"
+            "- Datos: ventas de dos cafeterías (Kaggle); cada fila es una transacción"
+        )
     st.caption("Streamlit + Docker · Ruta B: K-Means")
 
 
