@@ -4,6 +4,7 @@ Carga el artefacto entrenado (model.joblib) y asigna cada transacción nueva a
 uno de los 3 tipos de compra encontrados con K-Means. No vuelve a entrenar.
 """
 
+import base64
 from datetime import datetime
 from pathlib import Path
 
@@ -15,29 +16,30 @@ import streamlit as st
 
 MODEL_PATH = Path("model.joblib")
 DATA_PATH = Path("data/clean_cafe_saless.csv")
+FONDO_PATH = Path("assets/cafeteria.svg")
 
 # Nombres y textos de cada cluster (salen de la tabla de perfiles del notebook).
 CLUSTER_INFO = {
     0: {
-        "nombre": "Compra grande de alto valor",
-        "icono": "🛍️",
+        "nombre": "El Gran Antojo",
+        "icono": "🥪",
         "color": "#2E7D5B",
-        "resumen": "Varias unidades de productos caros: ensaladas, sándwiches, smoothies.",
-        "recomendacion": "Clientes de alto ticket: ideal para combos premium o programas de fidelización.",
+        "resumen": "Varias unidades de lo más premium: ensaladas, sándwiches y smoothies.",
+        "recomendacion": "Ofrézcale un combo premium o puntos de fidelidad.",
     },
     1: {
-        "nombre": "Volumen económico",
+        "nombre": "Para Compartir",
         "icono": "🍪",
         "color": "#C98A2B",
-        "resumen": "Muchas unidades de productos baratos: café, té, galletas.",
-        "recomendacion": "Compras para varias personas: promociones por cantidad (ej. 4x3 en galletas).",
+        "resumen": "Muchas unidades a buen precio: café, té y galletas.",
+        "recomendacion": "Ideal para promociones por cantidad, como un 4x3.",
     },
     2: {
-        "nombre": "Compra individual",
+        "nombre": "Café al Paso",
         "icono": "☕",
         "color": "#4A6FA5",
-        "resumen": "Una o dos unidades: consumo personal o de paso.",
-        "recomendacion": "Clientes de paso: sugerir un acompañamiento (venta cruzada) al pagar.",
+        "resumen": "Una o dos unidades, rápido y sencillo.",
+        "recomendacion": "Sugiera un acompañamiento al momento de pagar.",
     },
 }
 
@@ -74,6 +76,36 @@ st.markdown(
 )
 
 
+@st.cache_data
+def fondo_base64() -> str:
+    if not FONDO_PATH.exists():
+        return ""
+    return base64.b64encode(FONDO_PATH.read_bytes()).decode()
+
+
+_fondo = fondo_base64()
+if _fondo:
+    _url = f"url('data:image/svg+xml;base64,{_fondo}')"
+    st.markdown(
+        f"""
+        <style>
+          .stApp {{
+            background: linear-gradient(rgba(255,250,244,.90), rgba(255,250,244,.94)),
+                        {_url} center / cover fixed;
+          }}
+          [data-testid="stHeader"] {{background: transparent;}}
+          [data-testid="stSidebar"] {{background: rgba(246,241,235,.96);}}
+          .hero {{
+            background: linear-gradient(90deg, rgba(43,27,17,.90) 0%, rgba(43,27,17,.62) 55%, rgba(43,27,17,.25) 100%),
+                        {_url} center / cover;
+            padding: 2.2rem 1.8rem;
+          }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ---------------------------------------------------------------- Carga
 @st.cache_resource
 def cargar_artefacto():
@@ -95,7 +127,6 @@ except Exception as e:  # noqa: BLE001
 
 model = artifact["model"]
 features = artifact["features"]
-cluster_descriptions = artifact.get("cluster_descriptions", {})
 df = cargar_datos()
 
 if df is not None:
@@ -119,7 +150,7 @@ def clasificar(cantidad: float, precio: float, total: float):
 
 def nombre_cluster(c: int) -> str:
     info = CLUSTER_INFO.get(c, {})
-    return f"{info.get('icono', '')} Cluster {c} · {info.get('nombre', '')}"
+    return f"{info.get('icono', '')} {info.get('nombre', '')}"
 
 
 # ---------------------------------------------------------------- Barra lateral
@@ -131,8 +162,7 @@ with st.sidebar:
     st.markdown(
         "- Algoritmo: **K-Means** (3 clusters)\n"
         "- Preprocesamiento: imputación (mediana) + estandarización\n"
-        "- Variables: cantidad, precio unitario y gasto total\n"
-        "- Silhouette: **0.39**"
+        "- Variables: cantidad, precio unitario y gasto total"
     )
     st.markdown("**Datos**")
     st.markdown(
@@ -142,7 +172,7 @@ with st.sidebar:
     st.divider()
     st.markdown("**Tipos de compra**")
     for c, info in CLUSTER_INFO.items():
-        st.markdown(f"{info['icono']} **{c}** · {info['nombre']}")
+        st.markdown(f"{info['icono']} **{info['nombre']}**")
     st.divider()
     st.caption("Streamlit + Docker · Ruta B: K-Means")
 
@@ -154,7 +184,7 @@ st.markdown(
       <h1>☕ Segmentación de Ventas de Café</h1>
       <p>Ingrese una transacción y descubra a qué <b>tipo de compra</b> pertenece,
       según un modelo K-Means entrenado con ventas reales de dos cafeterías.</p>
-      <span class="chip">🤖 K-Means · 3 clusters</span>
+      <span class="chip">🤖 K-Means · 3 tipos de compra</span>
       <span class="chip">🐳 Desplegado con Docker</span>
       <span class="chip">📦 Modelo pre-entrenado (model.joblib)</span>
     </div>
@@ -162,11 +192,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-m1, m2, m3, m4 = st.columns(4)
+m1, m2, m3 = st.columns(3)
 m1.metric("Transacciones analizadas", f"{len(df):,}".replace(",", ".") if df is not None else "3.477")
 m2.metric("Tipos de compra", "3")
 m3.metric("Variables del modelo", str(len(features)))
-m4.metric("Silhouette", "0.39", help="Mide qué tan separados están los grupos (-1 a 1).")
 
 tab_clasificar, tab_lote, tab_perfiles, tab_datos, tab_como = st.tabs(
     ["🔍 Clasificar", "📁 Clasificar archivo", "📊 Perfiles", "🗂️ Datos", "ℹ️ Cómo funciona"]
@@ -228,7 +257,6 @@ with tab_clasificar:
                 "Quantity": cantidad,
                 "Price Per Unit": precio,
                 "Total Spent": total,
-                "Cluster": cluster,
                 "Tipo de compra": CLUSTER_INFO[cluster]["nombre"],
             })
 
@@ -240,15 +268,14 @@ with tab_clasificar:
             st.markdown(
                 f"""
                 <div class="result" style="background:{info['color']}">
-                  <p style="margin:0;opacity:.85">Cluster asignado</p>
-                  <h2>{info['icono']} Cluster {cluster} · {info['nombre']}</h2>
+                  <p style="margin:0;opacity:.85">Tipo de compra</p>
+                  <h2>{info['icono']} {info['nombre']}</h2>
                   <p>{info['resumen']}</p>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            st.markdown("**Perfil del grupo:** " + str(cluster_descriptions.get(cluster, "")).replace("$", "\\$").replace("~", "\\~"))
-            st.markdown(f"**💡 Recomendación comercial:** {info['recomendacion']}")
+            st.markdown(f"**💡 Recomendación:** {info['recomendacion']}")
 
             # Cercanía a cada tipo de compra (inverso de la distancia al centro).
             cercania = 1 / (distancias + 1e-9)
@@ -281,7 +308,7 @@ with tab_clasificar:
                 comp = pd.DataFrame({
                     "Variable": features,
                     "Su transacción": [cantidad_r, precio_r, total_r],
-                    f"Promedio del cluster {cluster}": prom.values.round(2),
+                    "Promedio del grupo": prom.values.round(2),
                 })
                 st.markdown("**Su transacción frente al promedio del grupo**")
                 st.dataframe(comp, hide_index=True, width="stretch")
@@ -322,8 +349,7 @@ with tab_lote:
             if faltan:
                 st.error(f"Faltan columnas en el archivo: {', '.join(faltan)}")
             else:
-                lote["Cluster"] = model.predict(lote[features])
-                lote["Tipo de compra"] = lote["Cluster"].map(lambda c: CLUSTER_INFO[int(c)]["nombre"])
+                lote["Tipo de compra"] = [nombre_cluster(int(c)) for c in model.predict(lote[features])]
                 st.success(f"Se clasificaron {len(lote)} transacciones.")
                 resumen = lote["Tipo de compra"].value_counts().rename_axis("Tipo de compra").reset_index(name="Transacciones")
                 c1, c2 = st.columns([1, 2])
@@ -342,8 +368,7 @@ with tab_perfiles:
     cols = st.columns(3)
     for col, (c, info) in zip(cols, CLUSTER_INFO.items()):
         with col.container(border=True):
-            st.markdown(f"### {info['icono']} Cluster {c}")
-            st.markdown(f"**{info['nombre']}**")
+            st.markdown(f"### {info['icono']} {info['nombre']}")
             st.caption(info["resumen"])
             if df is not None:
                 sub = df[df["cluster"] == c]
@@ -442,10 +467,9 @@ with tab_como:
            `docker build` → imagen → `docker run` → contenedor).
         """
     )
-    st.markdown("#### Evaluación")
+    st.markdown("#### Interpretación")
     st.markdown(
-        "- **Silhouette = 0.39**: estructura aceptable (escala de -1 a 1).\n"
-        "- Los grupos se interpretan con los promedios de cada cluster (pestaña **Perfiles**)."
+        "Cada tipo de compra se describe con los promedios de su grupo (pestaña **Perfiles**)."
     )
     st.markdown("#### Reproducibilidad")
     st.code(
