@@ -49,39 +49,6 @@ EJEMPLOS = {
     "🥗 Ensaladas": (4, 5.0),
 }
 
-VARIEDADES = [
-    ("Espresso", "Café concentrado, intenso y corto.", [(1.0, "#3B2214")]),
-    ("Americano", "Espresso alargado con agua caliente.", [(0.4, "#3B2214"), (0.6, "#7A4A2A")]),
-    ("Capuchino", "Espresso, leche y mucha espuma.",
-     [(0.33, "#3B2214"), (0.33, "#C69C72"), (0.34, "#FBF3E6")]),
-    ("Latte", "Espresso con mucha leche y poca espuma.",
-     [(0.25, "#3B2214"), (0.6, "#D9B48A"), (0.15, "#FBF3E6")]),
-    ("Mocha", "Espresso, chocolate y leche.",
-     [(0.25, "#2B160C"), (0.25, "#5C3A21"), (0.35, "#C69C72"), (0.15, "#FBF3E6")]),
-    ("Macchiato", "Espresso con una mancha de espuma.", [(0.7, "#3B2214"), (0.3, "#FBF3E6")]),
-]
-
-
-def taza_svg(capas, idx: int) -> str:
-    """Dibuja un vaso con las capas de la bebida (de abajo hacia arriba)."""
-    top, bottom, h = 10, 66, 56
-    rects, y = [], bottom
-    for frac, color in capas:
-        alto = h * frac
-        y -= alto
-        rects.append(f'<rect x="0" y="{y:.1f}" width="64" height="{alto + 0.5:.1f}" fill="{color}"/>')
-    vaso = "M10 10 L54 10 L49 66 Q48 70 44 70 L20 70 Q16 70 15 66 Z"
-    return (
-        f'<svg width="58" height="66" viewBox="0 0 70 76">'
-        f'<defs><clipPath id="vaso{idx}"><path d="{vaso}"/></clipPath></defs>'
-        f'<path d="M54 26 q12 0 12 12 q0 12 -14 12" stroke="#E8DCC8" stroke-width="4" fill="none"/>'
-        f'<g clip-path="url(#vaso{idx})">{"".join(rects)}</g>'
-        f'<path d="{vaso}" fill="none" stroke="#E8DCC8" stroke-width="2.5"/>'
-        f'<path d="M26 5 q-4 -4 0 -8 M38 5 q-4 -4 0 -8" stroke="#E8DCC8" stroke-width="2" fill="none" opacity=".6"/>'
-        f"</svg>"
-    )
-
-
 st.set_page_config(
     page_title="Café ML2 · Segmentación de compras",
     page_icon="☕",
@@ -108,12 +75,6 @@ st.markdown(
       [data-testid="stSidebar"] hr {border-color: rgba(244,235,221,.25);}
       [data-testid="stSidebar"] [data-testid="stExpander"] details {
         background: rgba(255,255,255,.06); border-color: rgba(244,235,221,.2);}
-      .carta {display: grid; grid-template-columns: 1fr 1fr; gap: .6rem; margin: .4rem 0 .6rem 0;}
-      .bebida {background: rgba(255,255,255,.07); border: 1px solid rgba(244,235,221,.15);
-               border-radius: 12px; padding: .6rem .5rem .55rem .5rem; text-align: center;}
-      .bebida svg {display: block; margin: 0 auto .3rem auto;}
-      .bebida b {display: block; font-size: .92rem;}
-      .bebida span {display: block; font-size: .72rem; opacity: .78; line-height: 1.25;}
     </style>
     """,
     unsafe_allow_html=True,
@@ -210,13 +171,6 @@ def nombre_cluster(c: int) -> str:
 with st.sidebar:
     st.markdown("## ☕ Café ML2")
     st.caption("Segmentación de compras en una cafetería.")
-    st.divider()
-    st.markdown("### Variedades de café")
-    tarjetas = "".join(
-        f'<div class="bebida">{taza_svg(capas, i)}<b>{nombre}</b><span>{desc}</span></div>'
-        for i, (nombre, desc, capas) in enumerate(VARIEDADES)
-    )
-    st.markdown(f'<div class="carta">{tarjetas}</div>', unsafe_allow_html=True)
     st.divider()
     st.markdown("### Tipos de compra")
     for c, info in CLUSTER_INFO.items():
