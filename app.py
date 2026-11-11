@@ -1,7 +1,7 @@
-"""Café ML2 · Aplicación Streamlit para clasificar transacciones de café.
+"""Café ML2 · Aplicación Streamlit para clasificar compras en una cafetería.
 
-Carga el artefacto entrenado (model.joblib) y asigna cada transacción nueva a
-uno de los 3 tipos de compra encontrados con K-Means. No vuelve a entrenar.
+Carga el artefacto entrenado (model.joblib) y asigna cada compra nueva a uno de
+los 3 tipos de compra encontrados con K-Means. No vuelve a entrenar.
 """
 
 import base64
@@ -18,13 +18,13 @@ MODEL_PATH = Path("model.joblib")
 DATA_PATH = Path("data/clean_cafe_saless.csv")
 FONDO_PATH = Path("assets/cafeteria.svg")
 
-# Nombres y textos de cada cluster (salen de la tabla de perfiles del notebook).
+# Nombres y textos de cada tipo de compra (salen de la tabla de perfiles del notebook).
 CLUSTER_INFO = {
     0: {
         "nombre": "El Gran Antojo",
         "icono": "🥪",
         "color": "#2E7D5B",
-        "resumen": "Varias unidades de lo más premium: ensaladas, sándwiches y smoothies.",
+        "resumen": "Varias unidades de lo más premium: ensaladas, sándwiches y batidos.",
         "recomendacion": "Ofrézcale un combo premium o puntos de fidelidad.",
     },
     1: {
@@ -43,6 +43,34 @@ CLUSTER_INFO = {
     },
 }
 
+# Nombres en español de las variables del modelo (las columnas originales están en inglés).
+VAR_ES = {"Quantity": "Cantidad", "Price Per Unit": "Precio unitario", "Total Spent": "Gasto total"}
+COLUMNAS_ES = {
+    "Transaction ID": "ID de transacción",
+    "Item": "Producto",
+    "Quantity": "Cantidad",
+    "Price Per Unit": "Precio unitario",
+    "Total Spent": "Gasto total",
+    "Payment Method": "Método de pago",
+    "Location": "Lugar",
+    "Transaction Date": "Fecha",
+}
+PRODUCTOS_ES = {
+    "Coffee": ("☕", "Café"),
+    "Tea": ("🍵", "Té"),
+    "Cookie": ("🍪", "Galleta"),
+    "Cake": ("🍰", "Pastel"),
+    "Juice": ("🧃", "Jugo"),
+    "Sandwich": ("🥪", "Sándwich"),
+    "Smoothie": ("🥤", "Batido"),
+    "Salad": ("🥗", "Ensalada"),
+}
+PAGO_ES = {"Cash": "Efectivo", "Credit Card": "Tarjeta de crédito", "Digital Wallet": "Billetera digital"}
+LUGAR_ES = {"In-store": "En tienda", "Takeaway": "Para llevar"}
+# Precio habitual de cada producto en los datos (se recalcula si están los datos).
+PRECIOS_BASE = {"Coffee": 2.0, "Tea": 1.5, "Cookie": 1.0, "Cake": 3.0, "Juice": 3.0,
+                "Sandwich": 4.0, "Smoothie": 4.0, "Salad": 5.0}
+
 EJEMPLOS = {
     "☕ Café": (1, 2.0),
     "🍪 Galletas": (5, 1.0),
@@ -50,7 +78,7 @@ EJEMPLOS = {
 }
 
 st.set_page_config(
-    page_title="Café ML2 · Segmentación de compras",
+    page_title="Café ML2 · Tipos de compra",
     page_icon="☕",
     layout="wide",
 )
@@ -75,6 +103,16 @@ st.markdown(
       [data-testid="stSidebar"] hr {border-color: rgba(244,235,221,.25);}
       [data-testid="stSidebar"] [data-testid="stExpander"] details {
         background: rgba(255,255,255,.06); border-color: rgba(244,235,221,.2);}
+      /* Ocultar textos en inglés propios de Streamlit */
+      [data-testid="stStatusWidget"] {visibility: hidden;}
+      [data-testid="stFileUploaderDropzoneInstructions"] > div > span,
+      [data-testid="stFileUploaderDropzoneInstructions"] > div > small {display: none;}
+      [data-testid="stFileUploaderDropzoneInstructions"] > div::before {
+        content: "Arrastre y suelte aquí su archivo CSV"; display: block;}
+      [data-testid="stFileUploaderDropzoneInstructions"] > div::after {
+        content: "Máximo 200 MB por archivo · CSV"; display: block; font-size: .8rem; opacity: .7;}
+      [data-testid="stFileUploaderDropzone"] button [data-testid="stMarkdownContainer"] {display: none;}
+      [data-testid="stFileUploaderDropzone"] button [data-has-shortcut]::after {content: "Buscar archivo";}
     </style>
     """,
     unsafe_allow_html=True,
@@ -136,41 +174,65 @@ def cargar_datos():
 try:
     artifact = cargar_artefacto()
 except Exception as e:  # noqa: BLE001
-    st.error(f"No se pudo cargar {MODEL_PATH}: {e}")
+    st.error(f"No se pudo cargar el modelo ({MODEL_PATH}): {e}")
     st.stop()
 
 model = artifact["model"]
 features = artifact["features"]
 df = cargar_datos()
 
+precios = dict(PRECIOS_BASE)
 if df is not None:
     df = df.copy()
     df["cluster"] = model.predict(df[features])
+    precios.update(df.groupby("Item")["Price Per Unit"].agg(lambda s: s.mode().iloc[0]).to_dict())
 
-if "historial" not in st.session_state:
-    st.session_state.historial = []
-if "cantidad" not in st.session_state:
-    st.session_state.cantidad = 2
-    st.session_state.precio = 3.0
+for clave, valor in {"historial": [], "pedido": [], "pedido_res": None, "cantidad": 2, "precio": 3.0}.items():
+    if clave not in st.session_state:
+        st.session_state[clave] = valor
+
+
+def a_modelo(cantidad, precio, total) -> pd.DataFrame:
+    """Arma la tabla con los nombres de columna que espera el modelo."""
+    return pd.DataFrame({"Quantity": cantidad, "Price Per Unit": precio, "Total Spent": total})[features]
 
 
 def clasificar(cantidad: float, precio: float, total: float):
-    x = pd.DataFrame([[cantidad, precio, total]], columns=features)
+    x = a_modelo([cantidad], [precio], [total])
     cluster = int(model.predict(x)[0])
-    # Distancia (en la escala estandarizada) a cada centro de cluster.
-    distancias = model.transform(x)[0]
+    distancias = model.transform(x)[0]  # distancia a cada centro (variables estandarizadas)
     return cluster, distancias
 
 
 def nombre_cluster(c: int) -> str:
-    info = CLUSTER_INFO.get(c, {})
+    info = CLUSTER_INFO.get(int(c), {})
     return f"{info.get('icono', '')} {info.get('nombre', '')}"
+
+
+def nombre_producto(item: str) -> str:
+    icono, nombre = PRODUCTOS_ES.get(item, ("", item))
+    return f"{icono} {nombre}".strip()
+
+
+def tarjeta_resultado(cluster: int, titulo: str = "Tipo de compra"):
+    info = CLUSTER_INFO[cluster]
+    st.markdown(
+        f"""
+        <div class="result" style="background:{info['color']}">
+          <p style="margin:0;opacity:.85">{titulo}</p>
+          <h2>{info['icono']} {info['nombre']}</h2>
+          <p>{info['resumen']}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"**💡 Recomendación:** {info['recomendacion']}")
 
 
 # ---------------------------------------------------------------- Barra lateral
 with st.sidebar:
     st.markdown("## ☕ Café ML2")
-    st.caption("Segmentación de compras en una cafetería.")
+    st.caption("Tipos de compra en una cafetería.")
     st.divider()
     st.markdown("### Tipos de compra")
     for c, info in CLUSTER_INFO.items():
@@ -181,30 +243,31 @@ with st.sidebar:
             "- **K-Means** con 3 grupos\n"
             "- Imputación (mediana) + estandarización\n"
             "- Variables: cantidad, precio unitario y gasto total\n"
-            "- Datos: ventas de dos cafeterías (Kaggle); cada fila es una transacción"
+            "- Datos: ventas de dos cafeterías (Kaggle); cada fila es la compra de un producto"
         )
-    st.caption("Streamlit + Docker · Ruta B: K-Means")
+    st.caption("Streamlit + Docker · Ruta B: agrupamiento con K-Means")
 
 
 # ---------------------------------------------------------------- Encabezado
 st.markdown(
     """
     <div class="hero">
-      <h1>☕ Segmentación de Ventas de Café</h1>
-      <p>Ingrese una transacción y descubra a qué <b>tipo de compra</b> pertenece,
-      según un modelo K-Means entrenado con ventas reales de dos cafeterías.</p>
+      <h1>☕ Tipos de Compra en la Cafetería</h1>
+      <p>Ingrese una compra, o un pedido con varios productos, y descubra a qué
+      <b>tipo de compra</b> pertenece, según un modelo entrenado con ventas reales
+      de dos cafeterías.</p>
       <span class="chip">🤖 K-Means · 3 tipos de compra</span>
       <span class="chip">🐳 Desplegado con Docker</span>
-      <span class="chip">📦 Modelo pre-entrenado (model.joblib)</span>
+      <span class="chip">📦 Modelo ya entrenado</span>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 m1, m2, m3 = st.columns(3)
-m1.metric("Transacciones analizadas", f"{len(df):,}".replace(",", ".") if df is not None else "3.477")
+m1.metric("Compras analizadas", f"{len(df):,}".replace(",", ".") if df is not None else "3.477")
 m2.metric("Tipos de compra", "3")
-m3.metric("Variables del modelo", str(len(features)))
+m3.metric("Productos en la carta", str(len(precios)))
 
 tab_clasificar, tab_lote, tab_perfiles, tab_datos, tab_como = st.tabs(
     ["🔍 Clasificar", "📁 Clasificar archivo", "📊 Perfiles", "🗂️ Datos", "ℹ️ Cómo funciona"]
@@ -212,115 +275,214 @@ tab_clasificar, tab_lote, tab_perfiles, tab_datos, tab_como = st.tabs(
 
 # ---------------------------------------------------------------- Clasificar
 with tab_clasificar:
+    modo = st.radio(
+        "¿Qué desea clasificar?",
+        ["🧾 Un producto", "🛒 Un pedido con varios productos"],
+        horizontal=True,
+    )
     col_form, col_res = st.columns([1, 1.25], gap="large")
 
-    with col_form:
-        st.subheader("📋 Datos de la transacción")
-        st.caption("Pruebe un ejemplo rápido o ingrese sus propios valores.")
-        e_cols = st.columns(len(EJEMPLOS))
-        for col, (etiqueta, (q, p)) in zip(e_cols, EJEMPLOS.items()):
-            if col.button(etiqueta, width="stretch"):
-                st.session_state.cantidad = q
-                st.session_state.precio = p
+    # ------------------------------ Modo: un producto
+    if modo == "🧾 Un producto":
+        with col_form:
+            st.subheader("📋 Datos de la compra")
+            st.caption("Pruebe un ejemplo rápido o ingrese sus propios valores.")
+            e_cols = st.columns(len(EJEMPLOS))
+            for col, (etiqueta, (q, p)) in zip(e_cols, EJEMPLOS.items()):
+                if col.button(etiqueta, width="stretch"):
+                    st.session_state.cantidad = q
+                    st.session_state.precio = p
 
-        with st.container(border=True):
-            cantidad = st.number_input(
-                "Cantidad de unidades (Quantity)",
-                min_value=1, max_value=20, step=1, key="cantidad",
-                help="En los datos de entrenamiento va de 1 a 5 unidades.",
-            )
-            precio = st.number_input(
-                "Precio unitario (Price Per Unit) [$]",
-                min_value=0.5, max_value=20.0, step=0.5, key="precio",
-                help="En los datos de entrenamiento va de $1 a $5.",
-            )
-            manual = st.toggle(
-                "Ingresar el gasto total manualmente",
-                help="Por defecto se calcula como cantidad × precio unitario.",
-            )
-            if manual:
-                total = st.number_input(
-                    "Gasto total (Total Spent) [$]",
-                    min_value=0.5, max_value=400.0, step=0.5,
-                    value=float(cantidad * precio),
+            with st.container(border=True):
+                cantidad = st.number_input(
+                    "Cantidad de unidades",
+                    min_value=1, max_value=20, step=1, key="cantidad",
+                    help="En los datos de entrenamiento va de 1 a 5 unidades.",
+                )
+                precio = st.number_input(
+                    "Precio unitario ($)",
+                    min_value=0.5, max_value=20.0, step=0.5, key="precio",
+                    help="En los datos de entrenamiento va de $1 a $5.",
+                )
+                manual = st.toggle(
+                    "Ingresar el gasto total manualmente",
+                    help="Por defecto se calcula como cantidad × precio unitario.",
+                )
+                if manual:
+                    total = st.number_input(
+                        "Gasto total ($)",
+                        min_value=0.5, max_value=400.0, step=0.5,
+                        value=float(cantidad * precio),
+                    )
+                else:
+                    total = float(cantidad * precio)
+                    st.metric("Gasto total", f"${total:,.2f}")
+
+                if cantidad > 5 or precio > 5:
+                    st.warning(
+                        "Algunos valores están fuera del rango de los datos de entrenamiento "
+                        "(1 a 5). El modelo igual asigna un tipo de compra, pero con menos respaldo."
+                    )
+
+                clasificar_btn = st.button("🔍 Clasificar tipo de compra", type="primary", width="stretch")
+
+        with col_res:
+            st.subheader("🎯 Resultado")
+            if clasificar_btn:
+                cluster, distancias = clasificar(cantidad, precio, total)
+                st.session_state.ultimo = (cantidad, precio, total, cluster, distancias)
+                st.session_state.historial.insert(0, {
+                    "Hora": datetime.now().strftime("%H:%M:%S"),
+                    "Producto": "—",
+                    "Cantidad": cantidad,
+                    "Precio unitario": precio,
+                    "Gasto total": total,
+                    "Tipo de compra": nombre_cluster(cluster),
+                })
+
+            if "ultimo" not in st.session_state:
+                st.info("Complete los datos y presione **Clasificar tipo de compra** para ver el resultado.")
+            else:
+                cantidad_r, precio_r, total_r, cluster, distancias = st.session_state.ultimo
+                tarjeta_resultado(cluster)
+
+                # Cercanía a cada tipo de compra (inverso de la distancia al centro del grupo).
+                cercania = 1 / (distancias + 1e-9)
+                cercania = cercania / cercania.sum()
+                dist_df = pd.DataFrame({
+                    "Tipo de compra": [nombre_cluster(c) for c in range(len(distancias))],
+                    "Cercanía (%)": np.round(cercania * 100, 1),
+                    "color": [CLUSTER_INFO[c]["color"] for c in range(len(distancias))],
+                })
+                st.markdown("**Cercanía a cada tipo de compra**")
+                chart = (
+                    alt.Chart(dist_df)
+                    .mark_bar(cornerRadiusEnd=4)
+                    .encode(
+                        x=alt.X("Cercanía (%):Q", scale=alt.Scale(domain=[0, 100])),
+                        y=alt.Y("Tipo de compra:N", sort=None, title=None, axis=alt.Axis(labelLimit=320)),
+                        color=alt.Color("color:N", scale=None, legend=None),
+                        tooltip=["Tipo de compra", "Cercanía (%)"],
+                    )
+                    .properties(height=150)
+                )
+                st.altair_chart(chart, width="stretch")
+                st.caption(
+                    "La cercanía compara la distancia de la compra al centro de cada grupo "
+                    "(variables estandarizadas). Es una guía visual, no una probabilidad."
+                )
+
+                if df is not None:
+                    prom = df[df["cluster"] == cluster][features].mean()
+                    comp = pd.DataFrame({
+                        "Variable": [VAR_ES[f] for f in features],
+                        "Su compra": [cantidad_r, precio_r, total_r],
+                        "Promedio del grupo": prom.values.round(2),
+                    })
+                    st.markdown("**Su compra frente al promedio del grupo**")
+                    st.dataframe(comp, hide_index=True, width="stretch")
+
+    # ------------------------------ Modo: pedido con varios productos
+    else:
+        with col_form:
+            st.subheader("🛒 Arme el pedido")
+            st.caption("Agregue cada producto con su cantidad. El precio se toma de la carta.")
+            with st.container(border=True):
+                producto = st.selectbox(
+                    "Producto",
+                    list(precios.keys()),
+                    format_func=lambda it: f"{nombre_producto(it)} · ${precios[it]:,.2f}",
+                )
+                cant_prod = st.number_input("Cantidad", min_value=1, max_value=20, step=1, value=1)
+                if st.button("➕ Agregar al pedido", width="stretch"):
+                    for linea in st.session_state.pedido:
+                        if linea["item"] == producto:
+                            linea["cantidad"] += int(cant_prod)
+                            break
+                    else:
+                        st.session_state.pedido.append({"item": producto, "cantidad": int(cant_prod)})
+                    st.session_state.pedido_res = None
+
+            if st.session_state.pedido:
+                tabla = pd.DataFrame([
+                    {
+                        "Producto": nombre_producto(l["item"]),
+                        "Cantidad": l["cantidad"],
+                        "Precio unitario": precios[l["item"]],
+                        "Subtotal": l["cantidad"] * precios[l["item"]],
+                    }
+                    for l in st.session_state.pedido
+                ])
+                st.markdown("**Su pedido**")
+                st.dataframe(tabla, hide_index=True, width="stretch")
+                st.metric("Total del pedido", f"${tabla['Subtotal'].sum():,.2f}")
+                b1, b2 = st.columns([2, 1])
+                clasificar_pedido = b1.button("🔍 Clasificar pedido", type="primary", width="stretch")
+                if b2.button("🗑️ Vaciar", width="stretch"):
+                    st.session_state.pedido = []
+                    st.session_state.pedido_res = None
+                    st.rerun()
+                if clasificar_pedido:
+                    cant = [l["cantidad"] for l in st.session_state.pedido]
+                    prec = [precios[l["item"]] for l in st.session_state.pedido]
+                    tot = [c * p for c, p in zip(cant, prec)]
+                    grupos = model.predict(a_modelo(cant, prec, tot))
+                    res = tabla.copy()
+                    res["grupo"] = [int(g) for g in grupos]
+                    res["Tipo de compra"] = res["grupo"].map(nombre_cluster)
+                    st.session_state.pedido_res = res
+                    hora = datetime.now().strftime("%H:%M:%S")
+                    for _, fila in res.iterrows():
+                        st.session_state.historial.insert(0, {
+                            "Hora": hora,
+                            "Producto": fila["Producto"],
+                            "Cantidad": fila["Cantidad"],
+                            "Precio unitario": fila["Precio unitario"],
+                            "Gasto total": fila["Subtotal"],
+                            "Tipo de compra": fila["Tipo de compra"],
+                        })
+            else:
+                st.info("El pedido está vacío. Agregue al menos un producto.")
+
+        with col_res:
+            st.subheader("🎯 Resultado del pedido")
+            res = st.session_state.pedido_res
+            if res is None:
+                st.info(
+                    "Arme el pedido y presione **Clasificar pedido**.\n\n"
+                    "El modelo aprendió con compras de **un producto a la vez**, así que cada "
+                    "producto del pedido se clasifica por separado."
                 )
             else:
-                total = float(cantidad * precio)
-                st.metric("Gasto total (Total Spent)", f"${total:,.2f}")
-
-            if cantidad > 5 or precio > 5:
-                st.warning(
-                    "Algunos valores están fuera del rango de los datos de entrenamiento "
-                    "(1 a 5). El modelo igual asigna un cluster, pero con menos respaldo."
+                gasto_por_tipo = res.groupby("grupo")["Subtotal"].sum()
+                principal = int(gasto_por_tipo.idxmax())
+                tarjeta_resultado(principal, "Tipo de compra principal del pedido")
+                st.caption("El tipo principal es el que concentra la mayor parte del dinero del pedido.")
+                r1, r2, r3 = st.columns(3)
+                r1.metric("Productos", len(res))
+                r2.metric("Unidades", int(res["Cantidad"].sum()))
+                r3.metric("Total", f"${res['Subtotal'].sum():,.2f}")
+                st.markdown("**Cada producto del pedido**")
+                st.dataframe(
+                    res[["Producto", "Cantidad", "Subtotal", "Tipo de compra"]],
+                    hide_index=True, width="stretch",
                 )
-
-            clasificar_btn = st.button("🔍 Clasificar tipo de compra", type="primary", width="stretch")
-
-    with col_res:
-        st.subheader("🎯 Resultado")
-        if clasificar_btn:
-            cluster, distancias = clasificar(cantidad, precio, total)
-            st.session_state.ultimo = (cantidad, precio, total, cluster, distancias)
-            st.session_state.historial.insert(0, {
-                "Hora": datetime.now().strftime("%H:%M:%S"),
-                "Quantity": cantidad,
-                "Price Per Unit": precio,
-                "Total Spent": total,
-                "Tipo de compra": CLUSTER_INFO[cluster]["nombre"],
-            })
-
-        if "ultimo" not in st.session_state:
-            st.info("Complete los datos y presione **Clasificar tipo de compra** para ver el resultado.")
-        else:
-            cantidad_r, precio_r, total_r, cluster, distancias = st.session_state.ultimo
-            info = CLUSTER_INFO[cluster]
-            st.markdown(
-                f"""
-                <div class="result" style="background:{info['color']}">
-                  <p style="margin:0;opacity:.85">Tipo de compra</p>
-                  <h2>{info['icono']} {info['nombre']}</h2>
-                  <p>{info['resumen']}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown(f"**💡 Recomendación:** {info['recomendacion']}")
-
-            # Cercanía a cada tipo de compra (inverso de la distancia al centro).
-            cercania = 1 / (distancias + 1e-9)
-            cercania = cercania / cercania.sum()
-            dist_df = pd.DataFrame({
-                "Tipo de compra": [nombre_cluster(c) for c in range(len(distancias))],
-                "Cercanía (%)": np.round(cercania * 100, 1),
-                "color": [CLUSTER_INFO[c]["color"] for c in range(len(distancias))],
-            })
-            st.markdown("**Cercanía a cada tipo de compra**")
-            chart = (
-                alt.Chart(dist_df)
-                .mark_bar(cornerRadiusEnd=4)
-                .encode(
-                    x=alt.X("Cercanía (%):Q", scale=alt.Scale(domain=[0, 100])),
-                    y=alt.Y("Tipo de compra:N", sort=None, title=None, axis=alt.Axis(labelLimit=320)),
-                    color=alt.Color("color:N", scale=None, legend=None),
-                    tooltip=["Tipo de compra", "Cercanía (%)"],
+                reparto = gasto_por_tipo.reset_index()
+                reparto["Tipo de compra"] = reparto["grupo"].map(nombre_cluster)
+                reparto["color"] = reparto["grupo"].map(lambda g: CLUSTER_INFO[int(g)]["color"])
+                st.markdown("**¿Cómo se reparte el dinero del pedido?**")
+                st.altair_chart(
+                    alt.Chart(reparto)
+                    .mark_bar(cornerRadiusEnd=4)
+                    .encode(
+                        x=alt.X("Subtotal:Q", title="Dinero ($)"),
+                        y=alt.Y("Tipo de compra:N", title=None, axis=alt.Axis(labelLimit=320)),
+                        color=alt.Color("color:N", scale=None, legend=None),
+                        tooltip=["Tipo de compra", alt.Tooltip("Subtotal:Q", title="Dinero ($)")],
+                    )
+                    .properties(height=40 + 40 * len(reparto)),
+                    width="stretch",
                 )
-                .properties(height=150)
-            )
-            st.altair_chart(chart, width="stretch")
-            st.caption(
-                "La cercanía compara la distancia de la transacción al centro de cada cluster "
-                "(variables estandarizadas). Es una guía visual, no una probabilidad."
-            )
-
-            if df is not None:
-                prom = df[df["cluster"] == cluster][features].mean()
-                comp = pd.DataFrame({
-                    "Variable": features,
-                    "Su transacción": [cantidad_r, precio_r, total_r],
-                    "Promedio del grupo": prom.values.round(2),
-                })
-                st.markdown("**Su transacción frente al promedio del grupo**")
-                st.dataframe(comp, hide_index=True, width="stretch")
 
     if st.session_state.historial:
         st.divider()
@@ -328,7 +490,7 @@ with tab_clasificar:
         h1.subheader("🕘 Historial de esta sesión")
         hist_df = pd.DataFrame(st.session_state.historial)
         h2.download_button(
-            "⬇️ Descargar CSV", hist_df.to_csv(index=False).encode("utf-8"),
+            "⬇️ Descargar historial", hist_df.to_csv(index=False).encode("utf-8"),
             file_name="historial_clasificaciones.csv", mime="text/csv", width="stretch",
         )
         st.dataframe(hist_df, hide_index=True, width="stretch")
@@ -338,35 +500,41 @@ with tab_clasificar:
 
 # ---------------------------------------------------------------- Clasificar archivo
 with tab_lote:
-    st.subheader("📁 Clasificar varias transacciones")
+    st.subheader("📁 Clasificar varias compras desde un archivo")
     st.markdown(
-        "Suba un archivo **CSV** con las columnas `Quantity`, `Price Per Unit` y `Total Spent`. "
-        "La aplicación asigna un tipo de compra a cada fila y permite descargar el resultado."
+        "Suba un archivo **CSV** con las columnas **Cantidad** y **Precio unitario** "
+        "(y opcionalmente **Gasto total**; si no está, se calcula). La aplicación asigna "
+        "un tipo de compra a cada fila y permite descargar el resultado."
     )
     plantilla = pd.DataFrame(
-        [[1, 2.0, 2.0], [5, 1.0, 5.0], [4, 5.0, 20.0]], columns=features
+        {"Cantidad": [1, 5, 4], "Precio unitario": [2.0, 1.0, 5.0], "Gasto total": [2.0, 5.0, 20.0]}
     )
     st.download_button(
         "⬇️ Descargar plantilla CSV", plantilla.to_csv(index=False).encode("utf-8"),
-        file_name="plantilla_transacciones.csv", mime="text/csv",
+        file_name="plantilla_compras.csv", mime="text/csv",
     )
     archivo = st.file_uploader("Archivo CSV", type=["csv"])
     if archivo is not None:
         try:
             lote = pd.read_csv(archivo)
-            faltan = [c for c in features if c not in lote.columns]
+            # Se aceptan columnas en español o con los nombres originales en inglés.
+            lote = lote.rename(columns={k: v for k, v in VAR_ES.items() if k in lote.columns})
+            if "Gasto total" not in lote.columns and {"Cantidad", "Precio unitario"} <= set(lote.columns):
+                lote["Gasto total"] = lote["Cantidad"] * lote["Precio unitario"]
+            faltan = [c for c in ["Cantidad", "Precio unitario"] if c not in lote.columns]
             if faltan:
                 st.error(f"Faltan columnas en el archivo: {', '.join(faltan)}")
             else:
-                lote["Tipo de compra"] = [nombre_cluster(int(c)) for c in model.predict(lote[features])]
-                st.success(f"Se clasificaron {len(lote)} transacciones.")
-                resumen = lote["Tipo de compra"].value_counts().rename_axis("Tipo de compra").reset_index(name="Transacciones")
+                grupos = model.predict(a_modelo(lote["Cantidad"], lote["Precio unitario"], lote["Gasto total"]))
+                lote["Tipo de compra"] = [nombre_cluster(g) for g in grupos]
+                st.success(f"Se clasificaron {len(lote)} compras.")
+                resumen = lote["Tipo de compra"].value_counts().rename_axis("Tipo de compra").reset_index(name="Compras")
                 c1, c2 = st.columns([1, 2])
                 c1.dataframe(resumen, hide_index=True, width="stretch")
                 c2.dataframe(lote, hide_index=True, width="stretch", height=260)
                 st.download_button(
                     "⬇️ Descargar resultado", lote.to_csv(index=False).encode("utf-8"),
-                    file_name="transacciones_clasificadas.csv", mime="text/csv",
+                    file_name="compras_clasificadas.csv", mime="text/csv",
                 )
         except Exception as e:  # noqa: BLE001
             st.error(f"No se pudo leer el archivo: {e}")
@@ -381,8 +549,8 @@ with tab_perfiles:
             st.caption(info["resumen"])
             if df is not None:
                 sub = df[df["cluster"] == c]
-                st.metric("Transacciones", f"{len(sub):,}".replace(",", "."))
-                st.caption(f"{len(sub) / len(df):.0%} del total de transacciones")
+                st.metric("Compras", f"{len(sub):,}".replace(",", "."))
+                st.caption(f"{len(sub) / len(df):.0%} del total de compras")
                 st.markdown(
                     f"- Cantidad promedio: **{sub['Quantity'].mean():.1f}** uds\n"
                     f"- Precio unitario promedio: **\\${sub['Price Per Unit'].mean():.2f}**\n"
@@ -390,41 +558,44 @@ with tab_perfiles:
                 )
 
     if df is not None:
-        st.markdown("#### ¿Cómo se ven los grupos?")
-        st.caption("Cada punto es una combinación de cantidad y precio; el tamaño indica cuántas transacciones hay.")
-        puntos = (
-            df.groupby(["Quantity", "Price Per Unit", "cluster"]).size().reset_index(name="Transacciones")
-        )
-        puntos["Tipo de compra"] = puntos["cluster"].map(nombre_cluster)
         dominio = [nombre_cluster(c) for c in CLUSTER_INFO]
         colores = [CLUSTER_INFO[c]["color"] for c in CLUSTER_INFO]
+        leyenda = alt.Legend(orient="bottom", title=None, labelLimit=320)
+
+        st.markdown("#### ¿Cómo se ven los grupos?")
+        st.caption("Cada punto es una combinación de cantidad y precio; el tamaño indica cuántas compras hay.")
+        puntos = (
+            df.groupby(["Quantity", "Price Per Unit", "cluster"]).size().reset_index(name="Compras")
+            .rename(columns={"Quantity": "Cantidad", "Price Per Unit": "Precio unitario"})
+        )
+        puntos["Tipo de compra"] = puntos["cluster"].map(nombre_cluster)
         scatter = (
             alt.Chart(puntos)
             .mark_circle(opacity=0.8)
             .encode(
-                x=alt.X("Quantity:Q", title="Cantidad (Quantity)", scale=alt.Scale(domain=[0, 6]), axis=alt.Axis(tickMinStep=1, format="d")),
-                y=alt.Y("Price Per Unit:Q", title="Precio unitario (Price Per Unit)", scale=alt.Scale(domain=[0, 6]), axis=alt.Axis(tickMinStep=1)),
-                size=alt.Size("Transacciones:Q", legend=None),
-                color=alt.Color("Tipo de compra:N", scale=alt.Scale(domain=dominio, range=colores),
-                                legend=alt.Legend(orient="bottom", title=None, labelLimit=320)),
-                tooltip=["Tipo de compra", "Quantity", "Price Per Unit", "Transacciones"],
+                x=alt.X("Cantidad:Q", scale=alt.Scale(domain=[0, 6]), axis=alt.Axis(tickMinStep=1, format="d")),
+                y=alt.Y("Precio unitario:Q", title="Precio unitario ($)", scale=alt.Scale(domain=[0, 6]),
+                        axis=alt.Axis(tickMinStep=1)),
+                size=alt.Size("Compras:Q", legend=None),
+                color=alt.Color("Tipo de compra:N", scale=alt.Scale(domain=dominio, range=colores), legend=leyenda),
+                tooltip=["Tipo de compra", "Cantidad", "Precio unitario", "Compras"],
             )
             .properties(height=380)
         )
         st.altair_chart(scatter, width="stretch")
 
         st.markdown("#### Productos más vendidos en cada tipo de compra")
-        prod = df.groupby(["cluster", "Item"]).size().reset_index(name="Transacciones")
+        prod = df.groupby(["cluster", "Item"]).size().reset_index(name="Compras")
+        prod["Producto"] = prod["Item"].map(nombre_producto)
         prod["Tipo de compra"] = prod["cluster"].map(nombre_cluster)
         barras = (
             alt.Chart(prod)
             .mark_bar()
             .encode(
-                x=alt.X("Transacciones:Q"),
-                y=alt.Y("Item:N", title=None, sort="-x", axis=alt.Axis(labelOverlap=False)),
-                color=alt.Color("Tipo de compra:N", scale=alt.Scale(domain=dominio, range=colores),
-                                legend=alt.Legend(orient="bottom", title=None, labelLimit=320)),
-                tooltip=["Tipo de compra", "Item", "Transacciones"],
+                x=alt.X("Compras:Q"),
+                y=alt.Y("Producto:N", title=None, sort="-x", axis=alt.Axis(labelOverlap=False)),
+                color=alt.Color("Tipo de compra:N", scale=alt.Scale(domain=dominio, range=colores), legend=leyenda),
+                tooltip=["Tipo de compra", "Producto", "Compras"],
             )
             .properties(height=340)
         )
@@ -439,22 +610,26 @@ with tab_datos:
         st.markdown(
             "Ventas de café de dos tiendas, obtenidas de "
             "[Kaggle](https://www.kaggle.com/datasets/maurosteban99/datos-caf-limpios). "
-            "Cada fila es una transacción."
+            "Cada fila es la compra de un producto."
         )
         d1, d2, d3 = st.columns(3)
         d1.metric("Filas", f"{len(df):,}".replace(",", "."))
         d2.metric("Productos distintos", df["Item"].nunique())
         d3.metric("Gasto promedio", f"${df['Total Spent'].mean():.2f}")
-        st.dataframe(df.drop(columns=["cluster"]).head(200), hide_index=True, width="stretch", height=320)
+        vista = df.drop(columns=["cluster"]).head(200).copy()
+        vista["Item"] = vista["Item"].map(nombre_producto)
+        vista["Payment Method"] = vista["Payment Method"].map(PAGO_ES).fillna(vista["Payment Method"])
+        vista["Location"] = vista["Location"].map(LUGAR_ES).fillna(vista["Location"])
+        st.dataframe(vista.rename(columns=COLUMNAS_ES), hide_index=True, width="stretch", height=320)
         st.caption("Se muestran las primeras 200 filas.")
         with st.expander("⚠️ Limitaciones de los datos"):
             st.markdown(
-                "- `Total Spent` debería ser cantidad × precio, pero no coincide en ~11% de las filas.\n"
+                "- El gasto total debería ser cantidad × precio, pero no coincide en ~11% de las filas.\n"
                 "- Algunas filas tienen precio 3.0 en productos que no cuestan eso; probablemente "
                 "son valores faltantes rellenados con la mediana.\n"
                 "- Cantidad y precio toman pocos valores (1 a 5), por lo que los grupos dividen una "
                 "\"cuadrícula\" más que descubrir grupos naturales.\n"
-                "- Cada fila es una transacción, no un cliente: los clusters son tipos de compra."
+                "- Cada fila es la compra de un producto, no un cliente: los grupos son tipos de compra."
             )
     else:
         st.info("El archivo de datos no está disponible en este despliegue.")
@@ -464,21 +639,20 @@ with tab_como:
     st.subheader("ℹ️ ¿Cómo funciona?")
     st.markdown(
         """
-        1. **Entrenamiento (notebook / `train.py`):** con las variables `Quantity`,
-           `Price Per Unit` y `Total Spent` se entrena un *Pipeline* de scikit-learn:
-           imputación por mediana → estandarización → **K-Means con 3 clusters**
-           (`random_state=42` para que sea reproducible).
-        2. **Artefacto:** el modelo entrenado se guarda en `model.joblib` junto con las
-           variables y la descripción de cada cluster.
+        1. **Entrenamiento (notebook y `train.py`):** con la cantidad, el precio unitario y
+           el gasto total de cada compra se entrena un modelo de scikit-learn:
+           imputación por mediana → estandarización → **K-Means con 3 grupos**
+           (con semilla fija para que el resultado sea reproducible).
+        2. **Modelo guardado:** el modelo entrenado se guarda en `model.joblib` junto con
+           las variables y la descripción de cada grupo.
         3. **Esta aplicación:** carga `model.joblib` **sin volver a entrenar**, aplica las
-           mismas transformaciones del entrenamiento y asigna el cluster más cercano.
-        4. **Despliegue:** la app se empaqueta con **Docker** (`Dockerfile` →
+           mismas transformaciones del entrenamiento y asigna el grupo más cercano.
+        4. **Pedidos con varios productos:** como el modelo aprendió con compras de un
+           producto a la vez, cada producto del pedido se clasifica por separado y se
+           muestra el tipo de compra que concentra más dinero.
+        5. **Despliegue:** la aplicación se empaqueta con **Docker** (`Dockerfile` →
            `docker build` → imagen → `docker run` → contenedor).
         """
-    )
-    st.markdown("#### Interpretación")
-    st.markdown(
-        "Cada tipo de compra se describe con los promedios de su grupo (pestaña **Perfiles**)."
     )
     st.markdown("#### Reproducibilidad")
     st.code(
@@ -490,7 +664,7 @@ with tab_como:
     )
 
 st.markdown(
-    '<div class="footer">Proyecto Reto ML · Streamlit + Docker · Ruta B: K-Means Clustering<br>'
+    '<div class="footer">Proyecto Reto ML · Streamlit + Docker · Ruta B: agrupamiento con K-Means<br>'
     "Datos: Kaggle · Ventas de café de dos tiendas</div>",
     unsafe_allow_html=True,
 )
